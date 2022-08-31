@@ -1,5 +1,5 @@
 use std::ops::Range;
-use crate::{model::pong, view::gameview::GameView};
+use crate::{model::pong::PlayArea, view::gameview::GameView};
 
 pub fn run() {
     unsafe {
@@ -18,12 +18,12 @@ fn map_into_range(value: usize, src_range: &Range<usize>, target_range: &Range<u
 
 pub unsafe fn default() -> Controller {
     Controller { 
-        play_area: pong::new(), 
+        play_area: PlayArea::default(), 
         game_view: GameView::default() 
     }
 }
 pub struct Controller{
-    play_area: pong::PlayArea,
+    play_area: PlayArea,
     game_view: GameView,
 }
 
@@ -33,7 +33,7 @@ impl Controller {
         self.game_view.init();
         self.game_view.open_window();
 
-        for i in 0..30 {
+        loop {
             self.game_view.render();
         }
 
