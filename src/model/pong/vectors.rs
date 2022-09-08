@@ -1,37 +1,6 @@
-use ndarray::arr1;
 use core::fmt;
 use std::{ops, fmt::{Display, Formatter}};
 
-
-enum Quadrant {
-    I,
-    II,
-    III,
-    IV
-}
-
-impl Quadrant {
-    fn determine_quadrant(x: f64, y: f64) -> Quadrant {
-        if x.is_sign_positive() && y.is_sign_positive() {
-            Self::I
-        } else if x.is_sign_negative() && y.is_sign_positive() {
-            Self::II
-        } else if x.is_sign_negative() && y.is_sign_negative() {
-            Self::III
-        } else {
-            Self::IV
-        }
-    }
-
-    fn angle_offset(&self) -> f64 {
-        match self {
-            Quadrant::I     => 0.0,
-            Quadrant::II    => 90.0,
-            Quadrant::III   => 180.0,
-            Quadrant::IV    => 270.0,
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy)]
 pub struct EuclideanVector {
@@ -45,6 +14,14 @@ impl Display for EuclideanVector {
     }
 }
 
+impl PartialEq for EuclideanVector {
+    fn eq(&self, other: &Self) -> bool {
+        self.get_angle() == other.get_angle() && self.get_magnitude() == other.get_magnitude()
+    }
+}
+
+impl Eq for EuclideanVector {}
+
 impl EuclideanVector {
     pub fn new(magnitude: f64, angle: f64) -> Self {
         Self {
@@ -52,14 +29,34 @@ impl EuclideanVector {
             angle
         }
     }
+
+    pub fn get_angle(&self) -> f64 {
+        self.angle
+    }
+
+    pub fn get_magnitude(&self) -> f64 {
+        self.magnitude
+    }
+
+    pub fn set_angle(&mut self, angle: f64) {
+        self.angle = angle;
+    }
+
+    pub fn set_magnitude(&mut self, magnitude: f64) {
+        self.magnitude = magnitude
+    }
 }
 
+impl EuclideanVector {
+    fn _normalize(u: f64, magnitude: f64) -> f64 {
+        u/magnitude
+    }
+}
 
 impl EuclideanVector {
 
     fn calculate_angle(x_comp: f64, y_comp: f64) -> f64 {
-        let quad = Quadrant::determine_quadrant(x_comp, y_comp);
-        (y_comp.abs()/x_comp.abs()).atan().to_degrees().round() + quad.angle_offset()
+        y_comp.atan2(x_comp).to_degrees()
     }
 
     pub fn x_component(&self) -> f64 {
@@ -67,7 +64,19 @@ impl EuclideanVector {
     }
 
     pub fn y_component(&self) -> f64 {
-        self.magnitude * self.angle.to_radians().sin().round()
+        self.magnitude * self.angle.to_radians().sin()
+    }
+
+    pub fn normal_x_component(&self) -> f64 {
+        Self::_normalize(self.x_component(), self.get_magnitude())
+    }
+
+    pub fn normal_y_component(&self) -> f64 {
+        Self::_normalize(self.y_component(), self.get_magnitude())
+    }
+
+    pub fn normalized(&self) -> Self {
+        Self::from_components(self.normal_x_component(), self.normal_y_component())
     }
 
     pub fn from_components(x_comp: f64, y_comp: f64) -> Self {
@@ -125,10 +134,35 @@ impl EuclideanVector {
     }
 
     pub fn collide_with(&mut self, opposing_vector: EuclideanVector) {
-        let v = *self;
+        let v = self.normalized();
+        let opposing_vector = opposing_vector.normalized();
         let u = opposing_vector*((v * opposing_vector) / (opposing_vector*opposing_vector));
         let w = v - u;
-        let new_vec = w - u;
-        self.update(new_vec);
+        self.set_angle((w - u).get_angle());
+    }
+}
+#[cfg(test)]
+mod tests {
+    use crate::model::pong::vectors::EuclideanVector;
+
+    #[test]
+    fn test_bed() {
+        let mut v1 = EuclideanVector::new(10.0, 45.0);
+        let v2 = EuclideanVector::new(1.0, 180.0);
+
+        let mut norm_v1 = v1.normalized();
+        let norm_v2 = v2.normalized();
+        println!("{} | {}", v1, norm_v1);
+        v1.collide_with(v2);
+        norm_v1.collide_with(norm_v2);
+
+        println!("{} | {}", v1, norm_v1);
+        println!("{} {} | {} {}", v1.x_component(), v1.y_component(), norm_v1.x_component(), norm_v1.y_component())
+    }
+
+    #[test]
+    fn fn_new_control() {
+        let new_vec = EuclideanVector::new(0.0, 0.0);
+        assert_eq!(new_vec, EuclideanVector{magnitude: 0.0, angle: 0.0})
     }
 }

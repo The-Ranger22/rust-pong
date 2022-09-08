@@ -3,6 +3,7 @@ use fermium::{
     prelude::*,
     *
 };
+use priority_queue::PriorityQueue;
 use crate::view::assets::Drawable;
 
 use self::gfx_environments::{IsGraphicsEnvironment, IsWindow, IsRenderer, sdl2::{SDLWindow, SDLGraphicsEnvironment, SDLRenderer}, Environments, invalid::InvalidWindow};
@@ -14,9 +15,9 @@ pub struct GameView {
     env: Box<dyn IsGraphicsEnvironment>,
     window: Box<dyn IsWindow>,
     renderer: Box<dyn IsRenderer>,
-    drawings: Vec<Box<dyn Drawable>>,
+    drawings: PriorityQueue<Box<dyn Drawable>, i32>,
     started: bool,
-    gfx_env: Environments
+    gfx_env: Environments,
 }
 
 // Constructors
@@ -25,7 +26,7 @@ impl GameView {
         let env = Environments::INVALID.build_env();
         let window = Environments::INVALID.build_window();
         let renderer = Environments::INVALID.build_renderer(&window);
-        Self {env, window, renderer, drawings: Vec::new(), started: false, gfx_env}
+        Self {env, window, renderer, drawings: PriorityQueue::new(), started: false, gfx_env}
     }
 
     pub unsafe fn default() -> Self {
@@ -43,13 +44,15 @@ impl GameView {
         self.renderer.present();
     }
     unsafe fn render_all_drawings(&mut self) {
-        while let Some(drawing) = self.drawings.pop() {
+        while let Some((drawing, priority)) = self.drawings.pop() {
             self.renderer.draw_drawable(drawing);
         }
     }
     unsafe fn render_bg_color(&self) {
         self.renderer.set_render_color(Colors::BLACK.as_rgb())
     }
+
+
 }
 
 // public operations
@@ -81,7 +84,8 @@ impl GameView {
     }
 
     pub fn add_drawable_object(&mut self, drawing: Box<dyn Drawable>) {
-        self.drawings.push(drawing);
+        let priority = drawing.fetch_z_index();
+        self.drawings.push(drawing, priority);
     }
 
     pub unsafe fn close_window(&mut self) {
@@ -298,10 +302,6 @@ mod gfx_environments {
                     Self::new(-1, 1)
                 }
             }
-
-            
-            
-            
         }
         
         pub struct SDLGraphicsEnvironment {

@@ -6,5 +6,5 @@ pub mod model;
 
 
 fn main() {
-    pong_controller::run();
+    pong_controller::run(1280, 600);
 }

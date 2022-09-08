@@ -1,8 +1,13 @@
 use fermium::renderer::{SDL_Renderer, SDL_SetRenderDrawColor};
 
-use self::drawable::{HasOrigin, HasColor, HasDimensions};
+use self::drawable::{HasPoint, HasColor, HasZIndex};
 
-pub trait Drawable:  HasOrigin + HasColor + HasDimensions{
+use std::hash::Hash;
+
+
+pub trait Drawable:  HasPoint + HasColor + HasZIndex {
+    fn fetch_id(&self) -> usize;
+
     unsafe fn draw(&self, renderer: *mut SDL_Renderer) -> bool;
 
     unsafe fn render_color(&self, renderer: *mut SDL_Renderer) {
@@ -16,16 +21,43 @@ pub trait Drawable:  HasOrigin + HasColor + HasDimensions{
     }
 }
 
+impl PartialEq for dyn Drawable {
+    fn eq(&self, other: &Self) -> bool {
+        self.fetch_z_index() == other.fetch_z_index()
+    }
+}
+
+impl Eq for dyn Drawable {
+    
+}
+
+impl Hash for dyn Drawable {
+    fn hash<H: std::hash::Hasher>(&self, state: &mut H) {
+        self.fetch_id().hash(state);
+        self.fetch_color().hash(state);
+        self.fetch_origin().hash(state);
+        self.fetch_z_index().hash(state);
+    }
+}
+
 pub mod drawable {
     use super::color::RGBColor;
     // structs that all drawable objects require
-    #[derive(Clone, Copy)]
-    pub struct Origin {
+    #[derive(Clone, Copy, Hash)]
+    pub struct Point {
         pub x: i32,
         pub y: i32
     }
 
-    impl Origin {
+    impl Point {
+        pub fn new(x: i32, y: i32) -> Self {
+            Self {x, y}
+        }
+
+        pub fn from_tuple(x_y: (i32, i32)) -> Self {
+            Self {x: x_y.0, y: x_y.1}
+        }
+
         pub fn update(&mut self, x: i32, y: i32) {
             self.x = x;
             self.y = y;
@@ -37,9 +69,19 @@ pub mod drawable {
         pub w: i32, 
         pub h: i32
     }
+
+    impl Dimensions {
+        pub fn new(w: i32, h: i32) -> Self {
+            Self {w, h}
+        }
+    }
     // Traits
-    pub trait HasOrigin {
-        fn fetch_origin(&self) -> Origin;
+    pub trait HasPoint {
+        fn fetch_origin(&self) -> Point;
+    }
+
+    pub trait HasZIndex {
+        fn fetch_z_index(&self) -> i32;
     }
     
     pub trait HasDimensions {
@@ -61,7 +103,7 @@ pub mod color {
     pub fn new(r: u8, g: u8, b: u8, a: u8) -> RGBColor {
         RGBColor {r, g, b, a}
     }
-    #[derive(Clone, Copy)]
+    #[derive(Clone, Copy, Hash)]
     pub struct RGBColor {
         pub r: u8,
         pub g: u8,
@@ -98,8 +140,8 @@ pub mod color {
         pub fn as_rgba(&self, a: u8) -> RGBColor {
             let (r, g, b) = match self {
                 Colors::RED     => build_rgb_tuple(255, 0, 0),
-                Colors::BLUE    => build_rgb_tuple(0, 255, 0),
-                Colors::GREEN   => build_rgb_tuple(0, 0, 255),
+                Colors::GREEN   => build_rgb_tuple(0, 255, 0),
+                Colors::BLUE    => build_rgb_tuple(0, 0, 255),
                 Colors::MAGENTA => build_rgb_tuple(255, 0, 255),
                 Colors::BLACK   => build_rgb_tuple(0, 0, 0),
                 Colors::WHITE   => build_rgb_tuple(255, 255, 255),
@@ -112,11 +154,9 @@ pub mod color {
     }
 }
 
-
-
 pub mod rectangle {
     use fermium::{renderer::SDL_RenderFillRect, rect::SDL_Rect};
-    use super::{Drawable, drawable::Dimensions, drawable::{Origin, HasColor, HasDimensions, HasOrigin}, color::RGBColor, color};
+    use super::{Drawable, drawable::Dimensions, drawable::{Point, HasColor, HasDimensions, HasPoint, HasZIndex}, color::RGBColor, color::{Colors}};
     
     // default paddle dimensions
     pub const DEF_WIDTH : i32 = 40;
@@ -124,29 +164,37 @@ pub mod rectangle {
     pub const DEF_DIMENSIONS: Dimensions = Dimensions{w: DEF_WIDTH, h: DEF_HEIGHT};
     pub const DEF_COLOR: RGBColor = RGBColor {r: 255, g: 255, b: 255, a: 255};
 
-    pub fn new(origin: Origin, dims: Dimensions, color: RGBColor) -> Rectangle {
-        Rectangle {
-            origin,
-            dims,
-            color
-        }
-    }
-
-    pub fn default(origin: Origin) -> Rectangle {
-        Rectangle {
-            origin,
-            dims: DEF_DIMENSIONS,
-            color: DEF_COLOR
-        }
-    }
-
     pub struct Rectangle {
-            origin: Origin,
-            dims: Dimensions,
-            color: RGBColor
+        id: usize,
+        origin: Point,
+        dims: Dimensions,
+        color: RGBColor,
+        z_index: i32
     }
     
+    impl Rectangle {
+        pub fn new(id: usize, origin: Point, dims: Dimensions, color: RGBColor, z_index: i32) -> Rectangle {
+            Rectangle {
+                id,
+                origin,
+                dims,
+                color,
+                z_index
+            }
+        }
+    }
+
+    impl Default for Rectangle {
+        fn default() -> Self {
+            Self {id: 0, origin: Point::new(0, 0), dims: Dimensions::new(0, 0), color: Colors::WHITE.as_rgb(), z_index: 0 }
+        }
+    }
+
     impl Drawable for Rectangle {
+        fn fetch_id(&self) -> usize {
+            self.id
+        }
+
         unsafe fn draw(&self, renderer: *mut fermium::renderer::SDL_Renderer) -> bool {
             SDL_RenderFillRect(
                 renderer,
@@ -172,12 +220,70 @@ pub mod rectangle {
         }
     }
 
-    impl HasOrigin for Rectangle {
-        fn fetch_origin(&self) -> Origin {
+    impl HasPoint for Rectangle {
+        fn fetch_origin(&self) -> Point {
             self.origin
+        }
+    }
+
+    impl HasZIndex for Rectangle {
+        fn fetch_z_index(&self) -> i32 {
+            self.z_index
         }
     }
 }
 
-    
+pub mod line {
+    use fermium::{renderer::{SDL_RenderDrawLine}};
+
+    use super::{Drawable, drawable::{HasColor, HasPoint, Point, HasZIndex}, color::RGBColor};
+
+    pub struct Line {
+        id: usize,
+        points: Vec<Point>,
+        color: RGBColor,
+        z_index: i32
+    }
+
+    impl Line {
+        pub fn new(id: usize, points: Vec<Point>, color: RGBColor, z_index: i32) -> Self {
+            Self {id, points, color, z_index}
+        }
+    }
+
+    impl Drawable for Line {
+        fn fetch_id(&self) -> usize {
+            self.id
+        }
+        unsafe fn draw(&self, renderer: *mut fermium::renderer::SDL_Renderer) -> bool {
+
+            for i in 1..self.points.len() {
+                let p1 = self.points[i - 1];
+                let p2 = self.points[i];
+                if SDL_RenderDrawLine(renderer, p1.x, p1.y, p2.x, p2.y) != 0 {
+                    return false
+                }
+            }
+            true
+        }
+    }
+
+    impl HasColor for Line {
+        fn fetch_color(&self) -> RGBColor {
+            self.color
+        }
+    }
+
+    impl HasPoint for Line {
+        fn fetch_origin(&self) -> Point {
+            self.points[0]
+        }
+    }
+
+    impl HasZIndex for Line {
+        fn fetch_z_index(&self) -> i32 {
+            self.z_index
+        }
+    }
+}
 
