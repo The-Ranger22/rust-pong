@@ -77,8 +77,13 @@ impl PlayArea {
     pub fn get_width(&self) -> usize {
         self.dims.w
     }
+
     pub fn get_height(&self) -> usize {
         self.dims.h
+    }
+
+    pub fn dims_as_tuple(&self) -> (usize, usize) {
+        (self.get_width(), self.get_height())
     }
 
     pub fn add_game_object(&mut self, obj: GameObject) {

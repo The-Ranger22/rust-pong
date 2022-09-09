@@ -18,19 +18,29 @@ pub struct GameView {
     drawings: PriorityQueue<Box<dyn Drawable>, i32>,
     started: bool,
     gfx_env: Environments,
+    width: i32,
+    height: i32
 }
 
 // Constructors
 impl GameView {
-    pub unsafe fn new(gfx_env: Environments) -> Self {
+    pub unsafe fn new(gfx_env: Environments, width: i32, height: i32) -> Self {
         let env = Environments::INVALID.build_env();
-        let window = Environments::INVALID.build_window();
+        let window = Environments::INVALID.build_window(width, height);
         let renderer = Environments::INVALID.build_renderer(&window);
-        Self {env, window, renderer, drawings: PriorityQueue::new(), started: false, gfx_env}
+        Self {env, window, renderer, drawings: PriorityQueue::new(), started: false, gfx_env, width, height}
     }
 
     pub unsafe fn default() -> Self {
-        Self::new(Environments::SDL)
+        Self::new(
+            Environments::SDL, 
+            gfx_environments::sdl2::DEFAULT_WINDOW_WIDTH, 
+            gfx_environments::sdl2::DEFAULT_WINDOW_HEIGHT
+        )
+    }
+
+    pub unsafe fn sdl2(width: i32, height: i32) -> Self {
+        Self::new(Environments::SDL, width, height)
     }
 }
 
@@ -67,12 +77,16 @@ impl GameView {
         if !self.started {
             self.init();
         }
-        self.window = self.gfx_env.build_window();
+        self.window = self.gfx_env.build_window(self.width, self.height);
         self.renderer = self.gfx_env.build_renderer(&self.window)
     }
 
     pub unsafe fn get_screen_dimensions(&self) -> (i32, i32) {
         self.window.fetch_dimensions()
+    }
+
+    pub unsafe fn keyboard_input(&mut self) -> Option<i32> {
+        self.env.handle_keyboard_input()
     }
 
     pub unsafe fn render(&mut self) {
@@ -119,10 +133,10 @@ mod gfx_environments {
             }
         }
 
-        pub unsafe fn build_window(&self) -> Box<dyn IsWindow> {
+        pub unsafe fn build_window(&self, width: i32, height: i32) -> Box<dyn IsWindow> {
             match self {
                 Environments::INVALID => Box::new(InvalidWindow::default()),
-                Environments::SDL => Box::new(SDLWindow::default()),
+                Environments::SDL => Box::new(SDLWindow::from_dims(width, height)),
             }
         }
 
@@ -145,6 +159,7 @@ mod gfx_environments {
         unsafe fn init(&self);
         unsafe fn quit(&self);
         unsafe fn delay(&self);
+        unsafe fn handle_keyboard_input(&mut self) -> Option<i32>;
     }
 
     pub trait IsWindow {
@@ -160,7 +175,6 @@ mod gfx_environments {
         unsafe fn draw_drawable(&self, drawing: Box<dyn Drawable>);
     }
 
-    
     pub mod invalid {
             use std::any::Any;
 
@@ -179,6 +193,10 @@ mod gfx_environments {
                 }
 
                 unsafe fn delay(&self) {
+                    panic!("The graphics environment is invalid!");
+                }
+
+                unsafe fn handle_keyboard_input(&mut self) -> Option<i32> {
                     panic!("The graphics environment is invalid!");
                 }
             }
@@ -240,14 +258,18 @@ mod gfx_environments {
     
     pub mod sdl2 {
         
-
         use std::any::Any;
 
-        use fermium::{SDL_Init, SDL_INIT_EVERYTHING, SDL_Quit, timer::SDL_Delay, video::{SDL_Window, SDL_GetWindowSize, SDL_DestroyWindow, SDL_CreateWindow}, renderer::{SDL_Renderer, SDL_CreateRenderer, SDL_RenderClear, SDL_RenderPresent, SDL_SetRenderDrawColor}};
+        use fermium::{SDL_Init, SDL_INIT_EVERYTHING, SDL_Quit, timer::SDL_Delay, video::{SDL_Window, SDL_GetWindowSize, SDL_DestroyWindow, SDL_CreateWindow, SDL_WINDOWPOS_CENTERED}, renderer::{SDL_Renderer, SDL_CreateRenderer, SDL_RenderClear, SDL_RenderPresent, SDL_SetRenderDrawColor}, prelude::{SDL_Event, SDL_WaitEventTimeout, SDL_KEYDOWN}};
         use crate::view::gameview::{gfx_environments::IsGraphicsEnvironment};
 
         use self::options::{WindowOptions, RendererOptions};
         use super::{IsWindow, IsRenderer};
+
+        pub const DEFAULT_WINDOW_WIDTH: i32 = 800;
+        pub const DEFAULT_WINDOW_HEIGHT: i32 = 600;
+        pub const DEFAULT_WINDOW_X_POS: i32 = SDL_WINDOWPOS_CENTERED;
+        pub const DEFAULT_WINDOW_Y_POS: i32 = SDL_WINDOWPOS_CENTERED;
 
         pub mod options {
             use fermium::video::{SDL_WINDOW_OPENGL, SDL_WINDOWPOS_CENTERED, SDL_WINDOW_ALLOW_HIGHDPI};
@@ -278,10 +300,10 @@ mod gfx_environments {
                 fn default() -> Self {
                     Self::new(
                         String::from("Default"),
-                        SDL_WINDOWPOS_CENTERED,
-                        SDL_WINDOWPOS_CENTERED,
-                        800,
-                        600,
+                        super::DEFAULT_WINDOW_X_POS,
+                        super::DEFAULT_WINDOW_Y_POS,
+                        super::DEFAULT_WINDOW_WIDTH,
+                        super::DEFAULT_WINDOW_HEIGHT,
                         (SDL_WINDOW_OPENGL | SDL_WINDOW_ALLOW_HIGHDPI).0,
                     )
                 }
@@ -305,8 +327,17 @@ mod gfx_environments {
         }
         
         pub struct SDLGraphicsEnvironment {
-            ms_delay: u32
+            ms_delay: u32,
+            event: SDL_Event,
+            timeout: i32
         }
+
+        impl SDLGraphicsEnvironment {
+            const SDL_EVENT_SUCCESS: i32 = 1;
+            const SDL_EVENT_FAILURE: i32 = 0;
+        }
+
+        
 
         impl IsGraphicsEnvironment for SDLGraphicsEnvironment {
             unsafe fn init(&self) {
@@ -320,13 +351,38 @@ mod gfx_environments {
             unsafe fn delay(&self) {
                 SDL_Delay(self.ms_delay)
             }
+
+            unsafe fn handle_keyboard_input(&mut self) -> Option<i32> {
+                if SDL_WaitEventTimeout(&mut self.event, self.timeout) ==  Self::SDL_EVENT_SUCCESS {
+                    match self.event.type_ {
+                        SDL_KEYDOWN => {
+                            Option::Some(self.event.key.keysym.sym.0)
+                        },
+                        _ => Option::None
+                    }
+                } else {
+                    Option::None
+                }
+            }
+        }
+
+        impl SDLGraphicsEnvironment {
+            pub const DEFAULT_REFRESH_RATE: u32 = 10;
+        }
+
+        impl SDLGraphicsEnvironment {
+            pub fn new(ms_delay: u32) -> Self {
+                Self{ms_delay, event: SDL_Event::default(), timeout: 1}
+            }
         }
 
         impl Default for SDLGraphicsEnvironment {
-            fn default() -> Self {
-                Self { ms_delay: 10 }
-            }
+            fn default() -> Self {Self::new(Self::DEFAULT_REFRESH_RATE)}
         }
+
+        
+
+
 
         pub struct SDLWindow {
             window: *mut SDL_Window
@@ -360,9 +416,7 @@ mod gfx_environments {
                     options.flags
                 );
                 assert!(!window.is_null());
-                Self {
-                    window
-                }
+                Self {window}
             }
 
             pub fn expose_window(&self) -> *mut SDL_Window {
@@ -374,6 +428,13 @@ mod gfx_environments {
         impl SDLWindow {
             pub unsafe fn default() -> Self {
                 Self::new(WindowOptions::default())
+            }
+
+            pub unsafe fn from_dims(width: i32, height: i32) -> Self {
+                let mut options = WindowOptions::default();
+                options.w = width;
+                options.h = height;
+                Self::new(options)
             }
         }
 
