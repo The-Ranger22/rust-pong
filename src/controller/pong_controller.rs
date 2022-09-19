@@ -1,6 +1,6 @@
-use std::{thread::{JoinHandle}, sync::{Arc, Mutex}};
+use std::{thread::{JoinHandle, self}, sync::{Arc, Mutex, atomic::{AtomicBool, Ordering, AtomicI32}}};
 
-use crate::{model::pong::{PlayArea, game_objects::{objects::{GameObject, ObjectType}, ObjectDimensions, Position, behaviors::{ObjectBehavior, ObjectInteractBehaviors, ObjectInteractBehavior, ObjectMovementBehavior, ObjectMovementBehaviors}, GameObjectFactory}, vectors::EuclideanVector}, view::{gameview::GameView, assets::{Drawable, rectangle::Rectangle, drawable::{Point, Dimensions}, color::Colors, line::Line}}};
+use crate::{model::pong::{PlayArea, game_objects::{objects::{GameObject, ObjectType}, ObjectDimensions, GameObjectFactory, Position}, vectors::EuclideanVector}, view::{gameview::{GameView}, assets::{Drawable, rectangle::Rectangle, drawable::{Point, Dimensions}, color::Colors, line::Line}}};
 
 pub fn run(width: usize, height: usize) {
     unsafe {
@@ -61,9 +61,19 @@ fn add_walls(play_area: &mut PlayArea, factory: &mut GameObjectFactory, wall_thi
     }
 }
 
+fn paddle_interact_behavior(paddle: &mut GameObject, other: &GameObject) {
+    match other.object_type {
+        ObjectType::WALL => paddle.kill_velocity(),
+        _ => ()
+    }
+}
+
 fn add_paddles(play_area: &mut PlayArea, factory: &mut GameObjectFactory, paddle_dims: (usize, usize), wall_thickness: usize, gap: usize) {
-    let left_paddle = factory.create(ObjectType::PADDLE, wall_thickness + gap, wall_thickness + gap, paddle_dims.0, paddle_dims.1);
+    let mut left_paddle = factory.create(ObjectType::PADDLE, wall_thickness + gap, wall_thickness + gap, paddle_dims.0, paddle_dims.1);
     let right_paddle = factory.create(ObjectType::PADDLE, play_area.get_width() - (wall_thickness + paddle_dims.0 + gap), wall_thickness + gap, paddle_dims.0, paddle_dims.1);
+    
+    left_paddle.behavior.set_interact_behavior(paddle_interact_behavior);
+
     play_area.add_game_object(left_paddle);
     play_area.add_game_object(right_paddle);
 }
@@ -94,8 +104,6 @@ fn add_goals(play_area: &mut PlayArea, factory: &mut GameObjectFactory, goal_wid
     play_area.add_game_object(right_goal);
 }
 
-
-
 fn init_playarea(width: usize, height: usize) -> PlayArea {
     let mut factory = GameObjectFactory::new();
     let mut play_area =  PlayArea::new(width, height);
@@ -110,82 +118,221 @@ fn init_playarea(width: usize, height: usize) -> PlayArea {
     // adding the paddles
     add_paddles(&mut play_area, &mut factory, paddle_dims, wall_thickness, pixel_gap_between_paddle_and_wall);
     // score zones
-    //add_goals(&mut play_area, &mut factory, goal_width, wall_thickness);
+    add_goals(&mut play_area, &mut factory, goal_width, wall_thickness);
     // adding the ball
     add_ball(&mut play_area, &mut factory, ball_width);
     play_area
 }
 
-
 unsafe fn init_gameview(width: usize, height: usize) -> GameView {
     let mut gameview = GameView::sdl2(width as i32, height as i32);
     gameview.init();
-    gameview.open_window();
     gameview
 }
 
-
 pub unsafe fn default(width: usize, height: usize) -> Controller {
     Controller { 
-        play_area: init_playarea(width, height), 
-        game_view: init_gameview(width, height),
-        keep_playing: true
+        play_area: init_playarea(width, height),
+        keep_playing: Arc::new(AtomicBool::new(true)),
+        threads: Vec::new(),
+        renderer_started: Arc::new(AtomicBool::new(false)),
+        keyboard_input: Arc::new(AtomicI32::new(-1)),
+        ready_to_render: Arc::new(AtomicBool::new(false)),
+        objects_to_render: Arc::new(Mutex::new(Vec::new())),
+        plyr_momentum: 0.0,
+        comp_momentum: 0.0,
+        plyr_score: 0,
+        comp_score: 0
     }
 }
+
 pub struct Controller{
     play_area: PlayArea,
-    game_view: GameView,
-    keep_playing: bool
+    keep_playing: Arc<AtomicBool>,
+    threads: Vec<JoinHandle<()>>,
+    renderer_started: Arc<AtomicBool>,
+    keyboard_input: Arc<AtomicI32>,
+    ready_to_render: Arc<AtomicBool>,
+    objects_to_render: Arc<Mutex<Vec<GameObject>>>,
+    plyr_momentum: f64,
+    comp_momentum: f64,
+    plyr_score: u8,
+    comp_score: u8
 }
 
-
-
 impl Controller {
-    fn add_game_object_drawings_to_renderer(&mut self) {
-        for i in 0..self.play_area.game_objects.len() {
-            self.game_view.add_drawable_object(
-                convert_game_object_to_drawing(i, &self.play_area.game_objects[i])
-            );
+    fn wait_on_all_threads(&mut self) {
+        while let Some(thread_handle) = self.threads.pop() {
+            thread_handle.join().unwrap()
         }
     }
 }
 
 impl Controller {
     unsafe fn render(&mut self) {
-        self.add_game_object_drawings_to_renderer();
-        self.game_view.render();
-        // let gv = Arc::clone(&self.game_view);
-        // self.add_handle(thread::spawn(move || {
-        //     gv.lock().unwrap().render()
-        // }));
+        let (width, height) = self.play_area.dims_as_tuple();
+        
+        let objects_to_render = Arc::clone(&self.objects_to_render);
+        let ready_to_render = Arc::clone(&self.ready_to_render);
+
+        let keep_playing = Arc::clone(&self.keep_playing);
+        let renderer_started = Arc::clone(&self.renderer_started);
+        let keyboard_input = Arc::clone(&self.keyboard_input);
+        self.threads.push(thread::spawn(move || {
+            //println!("Starting render thread");
+            let mut game_view = init_gameview(width, height);
+            renderer_started.store(true, Ordering::Release);
+            while keep_playing.load(Ordering::Acquire) {
+                while !ready_to_render.load(Ordering::Acquire) {}
+                let mut id = 0;
+                while let Some(mut obj) = objects_to_render.lock().unwrap().pop() {
+                    game_view.add_drawable_object(convert_game_object_to_drawing(id, &mut obj));
+                    id += 1;
+                }
+                //println!("Rendering!");
+                game_view.render();
+                if let Some(keypress) = game_view.keyboard_input() {
+                    match keypress {
+                        _ => {keyboard_input.store(keypress, Ordering::Release)}
+                    }
+                }
+                ready_to_render.store(false, Ordering::Release);
+            }
+            game_view.close_window();
+            game_view.quit();
+        }));
     }
 
-    fn resolve(&mut self) {
-        self.play_area.resolve_object_behaviors();
+    fn resolve_model(&mut self) {
+        let mut i = 0;
+        while self.ready_to_render.load(Ordering::Acquire) {
+            i += 1;
+        }
+        for object in self.play_area.game_objects.iter() {
+            self.objects_to_render.lock().unwrap().push(object.clone())
+        }
+        self.ready_to_render.store(true, Ordering::Release);
+        self.play_area.resolve_object_behaviors()
+    }
+}
+
+impl Controller {
+    const MOMENTUM_UPPER: f64 = 2.5;
+    const MOMENTUM_LOWER: f64 = -2.5;
+    const INCREMENT: f64 = 0.5;
+    const RESTING: f64 = 0.0;
+
+    fn move_up(paddle: &mut GameObject, momentum: &mut f64) {
+        if *momentum > Self::MOMENTUM_LOWER {
+            *momentum -= Self::INCREMENT;
+        }
+        Self::resolve_move(paddle, momentum)
+    }
+
+    fn move_down(paddle: &mut GameObject, momentum: &mut f64) {
+        if *momentum < Self::MOMENTUM_UPPER {
+            *momentum += Self::INCREMENT;
+        }
+        Self::resolve_move(paddle, momentum);
+    }
+
+    fn decay(momentum: &mut f64) {
+        if *momentum > Self::RESTING {
+            *momentum -= 0.1;
+        } else if *momentum < Self::RESTING {
+            *momentum += 0.1;
+        }
+    }
+
+    fn momentum_decay(&mut self) {
+        Self::decay(&mut self.plyr_momentum);
+        Self::resolve_move(&mut self.play_area.game_objects[4], &mut self.plyr_momentum)
+    }
+
+    fn resolve_move(paddle: &mut GameObject, momentum: &mut f64) {
+        paddle.pos.inc_y_pos(*momentum)
     }
 }
 
 impl Controller {
     unsafe fn handle_input(&mut self) {
-        if let Some(keycode) = self.game_view.keyboard_input() {
-            match keycode {
-                27 => {self.keep_playing = false},
-                _ => ()
-            }
+        match self.keyboard_input.load(Ordering::Acquire) {
+            27 => {self.keep_playing.store(false, Ordering::Release)},
+            119 => Self::move_up(&mut self.play_area.game_objects[4], &mut self.plyr_momentum),
+            115 => Self::move_down(&mut self.play_area.game_objects[4], &mut self.plyr_momentum),
+            _ => self.momentum_decay()
         }
     }
 }
 
 impl Controller {
-    unsafe fn run(&mut self) {
-        while self.keep_playing {
-            // TODO: switch to an interleave method -> update & render object before moving to the next 
-            self.add_game_object_drawings_to_renderer();
-            self.render();
-            self.resolve();
-            self.handle_input();
+    fn resolve_computer_turn(&mut self) {
+        let (ball_y_origin, ball_y_extent) = (
+            self.play_area.game_objects[8].pos.get_y_pos(), 
+            self.play_area.game_objects[8].y_extent()
+        );
+
+        let ball_y_center = ball_y_origin + (ball_y_extent - ball_y_origin).abs();
+
+        let paddle = &mut self.play_area.game_objects[5];
+        let paddle_y_center = paddle.pos.get_y_pos() + (paddle.y_extent() - paddle.pos.get_y_pos()).abs();
+
+        if paddle_y_center > ball_y_center {
+            Self::move_up(paddle, &mut self.comp_momentum)
+        } else if paddle_y_center < ball_y_center {
+            Self::move_down(paddle, &mut self.comp_momentum)
         }
-        self.game_view.close_window();
-        self.game_view.quit();
+
+
+
+    }
+}
+
+impl Controller {
+    const WIN_SCORE: u8 = 3;
+
+    fn reset(&mut self) {
+        println!("{} | {}", self.plyr_score, self.comp_score);
+        self.plyr_momentum = 0.0;
+        self.comp_momentum = 0.0;
+        let w_h = self.play_area.dims_as_tuple();
+        let ball = &mut self.play_area.game_objects[8];
+        let ball_width = ball.dim.get_width();
+        ball.pos = Position::new(w_h.0/2 - (ball_width/2.0) as usize, w_h.1/2 - (ball_width/2.0) as usize);
+        ball.vec = EuclideanVector::new(1.0, if rand::random() {-135.0} else {45.0})
+    }
+
+    fn check_if_score(&mut self) {
+        let left_score_zone = self.play_area.game_objects[6];
+        let right_score_zone = self.play_area.game_objects[7];
+        let ball = &mut self.play_area.game_objects[8];
+        if ball.intersecting(&left_score_zone) {
+            self.comp_score += 1;
+            self.reset();
+        } else if ball.intersecting(&right_score_zone) {
+            self.plyr_score += 1;
+            self.reset();
+        }
+    }
+
+    fn check_win_condition(&mut self) {
+        if self.plyr_score == Self::WIN_SCORE || self.comp_score == Self::WIN_SCORE {
+            self.keep_playing.store(false, Ordering::Release);
+        } 
+    }
+}
+
+impl Controller {
+    unsafe fn run(&mut self) {
+        self.render();
+        while self.keep_playing.load(Ordering::Acquire) {
+            self.handle_input();
+            self.resolve_computer_turn();
+            self.resolve_model();
+            self.check_if_score();
+            self.check_win_condition();
+        }
+        println!("Waiting on threads...");
+        self.wait_on_all_threads();
     } 
 }

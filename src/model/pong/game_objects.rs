@@ -1,9 +1,9 @@
-use std::{fmt::Display, collections::HashMap, hash::Hash, ops};
+use std::{fmt::Display, collections::HashMap};
 
-use num::{Num, PrimInt, FromPrimitive, ToPrimitive};
+use num::{ToPrimitive};
 
 use self::{behaviors::{ObjectBehavior, ObjectInteractBehavior, ObjectMovementBehavior, ObjectMovementBehaviors, ObjectInteractBehaviors}, objects::{GameObject, ObjectType, ObjectId}};
-use super::{PlayArea, vectors::EuclideanVector};
+use super::{vectors::EuclideanVector};
 
 pub mod traits;
 pub mod objects;
@@ -52,6 +52,10 @@ impl Position {
     pub fn as_discrete_tuple(&self) -> (usize, usize) {
         (self.x_pos as usize, self.y_pos as usize)
     }
+
+    pub fn set_y(&mut self, new_y: f64) {
+        self.y_pos = new_y;
+    }
 }
 
 
@@ -80,8 +84,6 @@ impl ObjectDimensions {
 pub struct GameObjectFactory {
     instance_map: HashMap<ObjectType, u32>
 }
-
-
 
 impl GameObjectFactory {
     fn prepare_instance_map() -> HashMap<ObjectType, u32> {

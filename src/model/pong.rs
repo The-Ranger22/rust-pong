@@ -1,6 +1,5 @@
-use std::{ops::Range, cmp::Ordering};
+use std::{ops::Range, collections::HashMap, sync::{Arc, Mutex}};
 use game_objects::Position;
-use num::complex::ComplexFloat;
 
 use crate::model::pong::game_objects::objects::ObjectType;
 
@@ -11,8 +10,6 @@ pub mod vectors;
 pub mod game_objects;
 pub const AREA_WIDTH: usize = 90;
 pub const AREA_HEIGHT: usize = 50;
-
-
 
 pub struct Bounds {
     w: usize,
@@ -74,6 +71,8 @@ impl PlayArea {
 
 
 impl PlayArea {
+    const MAX_SPEED: f64 = 5.0;
+    const SPEED_INCREMENT: f64 = 0.2;
     pub fn get_width(&self) -> usize {
         self.dims.w
     }
@@ -88,18 +87,17 @@ impl PlayArea {
 
     pub fn add_game_object(&mut self, obj: GameObject) {
         if self.object_within_bounds(&obj) {
-            self.game_objects.push(obj)
+            self.game_objects.push(obj);
         } else {
             panic!("Failed to add object to PlayArea: Object is out of bounds!")
         }
     }
 
     fn resolve_speed_increase(obj: &mut GameObject) {
-        let max_speed = 3.0;
-        if obj.vec.get_magnitude() > max_speed {
-            obj.vec.set_magnitude(max_speed);
+        if obj.vec.get_magnitude() > Self::MAX_SPEED {
+            obj.vec.set_magnitude(Self::MAX_SPEED);
         } else {
-            obj.vec.set_magnitude(obj.vec.get_magnitude() + 0.2)
+            obj.vec.set_magnitude(obj.vec.get_magnitude() + Self::SPEED_INCREMENT)
         }
     }
 
@@ -123,19 +121,22 @@ impl PlayArea {
     }
 
     pub fn resolve_object_behaviors(&mut self) {
-
-        for i in 0..self.game_objects.len() {
-            
-            // resolve interaction
-            for j in 0..self.game_objects.len() {
-                if !self.game_objects[i].eq(&self.game_objects[j]) {
+        
+        let number_objects = self.game_objects.len();
+        for i in 0..number_objects {
+            for j in 0..number_objects {
+                if i != j {
                     let other = self.game_objects[j];
                     Self::resolve_interact(&mut self.game_objects[i], &other);
                 }
             }
+            Self::resolve_movement(&mut self.game_objects[i])
+            
+            // resolve interaction
+            
             
             // resolve movement
-            Self::resolve_movement(&mut self.game_objects[i])
+            
         }
     }
 }

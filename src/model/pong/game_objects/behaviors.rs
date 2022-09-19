@@ -10,6 +10,15 @@ impl ObjectBehavior {
     pub fn new(interact_behavior: ObjectInteractBehavior, movement_behavior: ObjectMovementBehavior) -> Self {
         Self {interact_behavior, movement_behavior}
     }
+
+    pub fn set_interact_behavior(&mut self, behavior: fn(&mut GameObject, &GameObject)) {
+        self.interact_behavior.behavior = behavior
+    }
+
+    pub fn set_movement_behavior(&mut self, behavior: fn(&GameObject) -> Position) {
+        self.movement_behavior.behavior = behavior
+    }
+
 }
 
 impl ObjectBehavior {
@@ -41,6 +50,10 @@ pub struct ObjectInteractBehavior {
 }
 
 impl ObjectInteractBehavior {
+    pub fn new(behavior: fn(&mut GameObject, &GameObject)) -> ObjectInteractBehavior {
+        Self {behavior}
+    }
+
     pub fn create(interact_behavior: ObjectInteractBehaviors) -> ObjectInteractBehavior {
         ObjectInteractBehavior {
             behavior: match interact_behavior {
@@ -74,6 +87,8 @@ impl ObjectMovementBehaviors {
         
         new_pos
     }
+
+    
 }
 
 #[derive(Clone, Copy)]

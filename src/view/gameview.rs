@@ -6,15 +6,15 @@ use fermium::{
 use priority_queue::PriorityQueue;
 use crate::view::assets::Drawable;
 
-use self::gfx_environments::{IsGraphicsEnvironment, IsWindow, IsRenderer, sdl2::{SDLWindow, SDLGraphicsEnvironment, SDLRenderer}, Environments, invalid::InvalidWindow};
+use self::gfx_environments::{IsGraphicsEnvironment, IsWindow, IsRenderer, sdl2::{SDLWindow, SDLGraphicsEnvironment, SDLRenderer, options::WindowOptions}, Environments, invalid::InvalidWindow};
 
 use super::assets::color::Colors;
 
 
 pub struct GameView {
-    env: Box<dyn IsGraphicsEnvironment>,
-    window: Box<dyn IsWindow>,
-    renderer: Box<dyn IsRenderer>,
+    env: SDLGraphicsEnvironment,
+    window: SDLWindow,
+    renderer: SDLRenderer,
     drawings: PriorityQueue<Box<dyn Drawable>, i32>,
     started: bool,
     gfx_env: Environments,
@@ -25,9 +25,10 @@ pub struct GameView {
 // Constructors
 impl GameView {
     pub unsafe fn new(gfx_env: Environments, width: i32, height: i32) -> Self {
-        let env = Environments::INVALID.build_env();
-        let window = Environments::INVALID.build_window(width, height);
-        let renderer = Environments::INVALID.build_renderer(&window);
+        let env = SDLGraphicsEnvironment::new(10);
+        env.init();
+        let window = SDLWindow::from_dims(width, height);
+        let renderer = SDLRenderer::default(window.expose_window());
         Self {env, window, renderer, drawings: PriorityQueue::new(), started: false, gfx_env, width, height}
     }
 
@@ -48,28 +49,28 @@ impl GameView {
 // Private 
 impl GameView {
     unsafe fn clear_render(&self) {
-        self.renderer.clear();
+        self.renderer.clear()
     }
+
     unsafe fn write_render(&self) {
-        self.renderer.present();
+        self.renderer.present()
     }
+
     unsafe fn render_all_drawings(&mut self) {
         while let Some((drawing, priority)) = self.drawings.pop() {
             self.renderer.draw_drawable(drawing);
         }
+        
     }
+
     unsafe fn render_bg_color(&self) {
         self.renderer.set_render_color(Colors::BLACK.as_rgb())
     }
-
-
 }
 
 // public operations
 impl GameView {
     pub unsafe fn init(&mut self) {
-        self.env = self.gfx_env.build_env();
-        self.env.init();
         self.started = true;
     }
 
@@ -77,8 +78,8 @@ impl GameView {
         if !self.started {
             self.init();
         }
-        self.window = self.gfx_env.build_window(self.width, self.height);
-        self.renderer = self.gfx_env.build_renderer(&self.window)
+        self.window = SDLWindow::from_dims(self.width, self.height);
+        self.renderer = SDLRenderer::default(self.window.expose_window())
     }
 
     pub unsafe fn get_screen_dimensions(&self) -> (i32, i32) {
@@ -104,7 +105,6 @@ impl GameView {
 
     pub unsafe fn close_window(&mut self) {
         self.window.close();
-        self.window = Box::new(InvalidWindow::default())
     }
 
     pub unsafe fn quit(&self) {
@@ -113,9 +113,8 @@ impl GameView {
 }
 
 
-mod gfx_environments {
+pub mod gfx_environments {
     use std::any::Any;
-
     use crate::view::assets::{color::RGBColor, Drawable};
 
     use self::{invalid::{InvalidGraphicsEnvironment, InvalidWindow, InvalidRenderer}, sdl2::{SDLGraphicsEnvironment, SDLWindow, SDLRenderer}};
@@ -260,7 +259,7 @@ mod gfx_environments {
         
         use std::any::Any;
 
-        use fermium::{SDL_Init, SDL_INIT_EVERYTHING, SDL_Quit, timer::SDL_Delay, video::{SDL_Window, SDL_GetWindowSize, SDL_DestroyWindow, SDL_CreateWindow, SDL_WINDOWPOS_CENTERED}, renderer::{SDL_Renderer, SDL_CreateRenderer, SDL_RenderClear, SDL_RenderPresent, SDL_SetRenderDrawColor}, prelude::{SDL_Event, SDL_WaitEventTimeout, SDL_KEYDOWN}};
+        use fermium::{SDL_Init, SDL_INIT_EVERYTHING, SDL_Quit, timer::SDL_Delay, video::{SDL_Window, SDL_GetWindowSize, SDL_DestroyWindow, SDL_CreateWindow, SDL_WINDOWPOS_CENTERED}, renderer::{SDL_Renderer, SDL_CreateRenderer, SDL_RenderClear, SDL_RenderPresent, SDL_SetRenderDrawColor}, prelude::{SDL_Event, SDL_WaitEventTimeout, SDL_KEYDOWN, SDL_KEYUP}};
         use crate::view::gameview::{gfx_environments::IsGraphicsEnvironment};
 
         use self::options::{WindowOptions, RendererOptions};
@@ -294,6 +293,8 @@ mod gfx_environments {
                         flags
                     }
                 }
+
+                
             }
 
             impl Default for WindowOptions {
@@ -333,11 +334,9 @@ mod gfx_environments {
         }
 
         impl SDLGraphicsEnvironment {
-            const SDL_EVENT_SUCCESS: i32 = 1;
-            const SDL_EVENT_FAILURE: i32 = 0;
+            pub const SDL_EVENT_SUCCESS: i32 = 1;
+            pub const SDL_EVENT_FAILURE: i32 = 0;
         }
-
-        
 
         impl IsGraphicsEnvironment for SDLGraphicsEnvironment {
             unsafe fn init(&self) {
@@ -357,6 +356,9 @@ mod gfx_environments {
                     match self.event.type_ {
                         SDL_KEYDOWN => {
                             Option::Some(self.event.key.keysym.sym.0)
+                        },
+                        SDL_KEYUP => {
+                            Option::Some(-1)
                         },
                         _ => Option::None
                     }
@@ -475,6 +477,7 @@ mod gfx_environments {
             }
         }
 
+        
         
     }
 }

@@ -1,8 +1,8 @@
 use std::fmt::Display;
-use std::hash::{Hash, Hasher};
+use std::hash::{Hash};
 use std::ops::Range;
 
-use crate::{ model::pong::{vectors::EuclideanVector, PlayArea}};
+use crate::{ model::pong::{vectors::EuclideanVector}};
 
 use super::{Position, behaviors::ObjectBehavior, ObjectDimensions};
 
